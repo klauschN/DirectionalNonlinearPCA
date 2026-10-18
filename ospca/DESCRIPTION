@@ -1,0 +1,36 @@
+Package: ospca
+Title: One-Sided Linear and Nonlinear Principal Component Analysis
+Version: 1.0.0
+Authors@R: 
+    c(person(given = "Klaus",
+             family = "Nordhausen",
+             role = c("aut", "cre"),
+             email = "klausnordhausenR@gmail.com",
+             comment = c(ORCID = "0000-0002-3758-8501")),
+      person(given = "Marc",
+             family = "Hallin",
+             role = "aut",
+             comment = c(ORCID = "0000-0002-6599-7409")),
+      person(given = "Una",
+             family = "Radojicic",
+             role = "aut",
+             comment = c(ORCID = "0000-0003-0329-0595")))
+Description: Principal component analysis is a bidirectional method, as the sign
+    of a principal direction carries no meaning. This package provides one-sided
+    (directional) principal component analysis, in which each direction is
+    considered separately. A linear version is based on positive-part
+    projections, and a nonlinear version is based on the empirical
+    center-outward quantile function of Hallin et al. (2021)
+    <doi:10.1214/20-AOS1996>, with principal curves and curvilinear projections.
+    For comparison, the independent nonlinear component analysis of Gunsilius and
+    Schennach (2023) <doi:10.1080/01621459.2021.1990768> is also included.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Imports: stats, graphics, parallel, transport, Rcpp
+LinkingTo: Rcpp
+Suggests: knitr, testthat (>= 3.0.0)
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0
+NeedsCompilation: yes

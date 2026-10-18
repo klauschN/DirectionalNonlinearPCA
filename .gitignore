@@ -1,0 +1,10 @@
+# compiled code of the R package
+ospca/src/*.o
+ospca/src/*.so
+ospca/src/*.dll
+# output of paper_examples.R
+paper_figures/
+# R session files
+.Rhistory
+.RData
+.Rproj.user/

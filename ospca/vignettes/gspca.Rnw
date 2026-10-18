@@ -1,0 +1,207 @@
+\documentclass[11pt,a4paper]{article}
+%\VignetteIndexEntry{Independent nonlinear component analysis (GS-PCA)}
+%\VignetteEngine{knitr::knitr}
+%\VignetteEncoding{UTF-8}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{parskip}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\pkg}[1]{\textbf{#1}}
+\setlength{\emergencystretch}{3em}
+
+\title{Independent nonlinear component analysis (GS-PCA)\\
+with the R package \pkg{ospca}}
+\author{}
+\date{\pkg{ospca} version \Sexpr{packageVersion("ospca")}}
+
+\begin{document}
+\maketitle
+
+<<setup, include = FALSE>>=
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", size = "small",
+                      fig.width = 8, fig.height = 4, out.width = "\\textwidth",
+                      fig.align = "center", fig.pos = "!htb")
+options(ospca.threads = 2, width = 80)
+@
+
+\section{Introduction}
+
+For comparison with the one-sided methods of the package, \code{gspca()}
+implements the independent nonlinear component analysis of Gunsilius and
+Schennach (2023), which we call GS-PCA. Unlike \code{ospca()} and
+\code{nlospca()}, it is a bidirectional method.
+
+Let $X$ be a random vector in $\mathbb{R}^d$ with density $f$, and let $T$ be
+the Brenier map that pushes the distribution of $X$ forward to the $d$-variate
+standard normal distribution, with density $\varphi$. That is, $T$ is the
+gradient of a convex function and $T(X)$ is standard normal. We write $y$ for
+points in the space of the data and $x = T(y)$ for points in the space of the
+normal reference distribution, and $J_g$ for the Jacobian matrix of a map $g$.
+Since $T$ is the gradient of a convex function, $J_T$ is symmetric and positive
+definite. The directions $u_1, \ldots, u_d$ are the eigenvectors, in decreasing
+order of the eigenvalues, of
+\[
+\bar J = \int \varphi(x) \ln J_{T^{-1}}(x) \, dx
+       = -\int f(y) \ln J_T(y) \, dy,
+\]
+where $\ln$ denotes the matrix logarithm, and the two forms are equal as
+$J_{T^{-1}}(x) = J_T(T^{-1}(x))^{-1}$. The principal curves are
+$T^{-1}(r u_j)$, $r \in \mathbb{R}$, the scores are
+$\langle T(X), u_j \rangle$, and the $k$-dimensional representation of $X$ is
+\[
+T^{-1}\Big(\sum_{j \le k} \langle T(X), u_j \rangle u_j\Big).
+\]
+For Gaussian data, $T^{-1}$ is linear, the directions are the linear principal
+components, and the eigenvalues of $\bar J$ are half the logarithms of the
+eigenvalues of the covariance matrix.
+
+The implementation is a simple discrete estimator and not the smooth potential
+fit of the paper. A tensor grid of $n_g$ = \code{n\_grid} standard normal
+quantiles per axis is coupled with the sample by an exact optimal transport
+plan, and the image of a grid point under $T^{-1}$ is the barycenter of the
+observations coupled with it. The Jacobians of $T^{-1}$ are then estimated at
+the grid points by symmetrized central differences, and $\bar J$ is the average
+of their matrix logarithms. In this vignette we illustrate the function and its
+methods on simulated data.
+
+\section{Gaussian data}
+
+For bivariate normal data, the directions and the eigenvalues can be compared
+with those of the covariance matrix:
+
+<<gauss>>=
+library(ospca)
+set.seed(1)
+Sigma <- matrix(c(4, 1, 1, 1), 2)
+Xg <- matrix(rnorm(2000), ncol = 2) %*% chol(Sigma)
+fit_g <- gspca(Xg)
+fit_g
+directions(fit_g)
+eigen(Sigma)$vectors
+0.5 * log(eigen(Sigma)$values)
+@
+
+Note that, as in classical PCA, the signs of the directions are arbitrary.
+
+\section{Nonlinear data}
+
+As a nonlinear example we use observations around a parabola:
+
+<<data>>=
+set.seed(1)
+x <- rnorm(1000)
+X <- cbind(x1 = x, x2 = x^2 + rnorm(1000, sd = 0.5))
+fit <- gspca(X)
+summary(fit)
+@
+
+The default grid has about two observations per grid point, here $22^2$ grid
+points. A few grid points whose Jacobian estimate is not positive definite are
+left out of $\bar J$; their proportion is given in the summary and is also
+available as \code{fit\$diagnostics\$dropped}.
+
+\code{plot()} draws the data together with the principal curves
+$T^{-1}(r u_j)$, and \code{screeplot()} shows the eigenvalues of $\bar J$
+(bars) together with the reconstruction errors (line) described in
+Section~\ref{sec:reconstruction}; see Figure~\ref{fig:plots}. The first
+direction is vertical. Its curve runs up the middle of the parabola and then
+into the left arm, as there are no observations in the middle above a certain
+height. The second curve follows the bend at the bottom of the parabola. Note
+that the eigenvalues of $\bar J$ are on a logarithmic scale and can therefore be
+negative; for Gaussian data, a negative eigenvalue corresponds to a variance
+below one.
+
+<<plots, fig.height = 5, fig.cap = "Data with the GS-PCA principal curves (left) and scree plot (right).">>=
+par(mfrow = c(1, 2))
+plot(fit)
+screeplot(fit)
+@
+
+The curves are part of the fit (\code{fit\$curves}). They cover only the range
+of the reference grid, where $T^{-1}$ is estimated, and they inherit the
+roughness of the discrete map. The argument \code{eps\_curves} smooths them by a
+Tikhonov filter, which changes only the curves and not the directions
+(Figure~\ref{fig:smooth-curves}):
+
+<<smooth-curves, fig.width = 4.5, fig.height = 5, out.width = "0.5\\textwidth", fig.cap = "Principal curves smoothed with \\texttt{eps\\_curves = 1}.">>=
+fit_s <- gspca(X, eps_curves = 1)
+plot(fit_s)
+@
+
+\section{Scores, new observations and reconstruction}\label{sec:reconstruction}
+
+The scores are the coordinates $\langle T(X_i), u_j \rangle$ of the transformed
+observations $T(X_i)$, which are also part of the fit (\code{fit\$TX}). Since
+the estimated map is discrete, $T(X_i)$ is the (mass-weighted) grid point that
+the observation is coupled with.
+
+<<scores>>=
+head(scores(fit))
+head(fit$TX)
+@
+
+\code{predict()} maps new observations to the reference space by the cyclically
+monotone extension of the discrete map. The potentials of this extension are
+computed with the first call, which therefore takes longer than later ones.
+
+<<predict>>=
+Xnew <- rbind(c(-2, 4), c(2, 4), c(0, -0.5))
+predict(fit, Xnew)
+@
+
+\code{reconstruct()} gives the $k$-dimensional representation, and
+\code{reconstruction\_mse()} the mean squared reconstruction error. With the
+first direction only, the observations are replaced by points on the first
+curve, so that their horizontal position is lost; the second direction adds it:
+
+<<reconstruct>>=
+sapply(1:2, function(k) reconstruction_mse(X, reconstruct(fit, n_components = k)))
+@
+
+\code{fitted()} and \code{residuals()} give the reconstructions and the data
+minus their reconstructions:
+
+<<fitted>>=
+head(fitted(fit, n_components = 1))
+head(residuals(fit, n_components = 1))
+@
+
+\section{Estimation choices}
+
+The estimate of $\bar J$ depends on the grid and on the finite differences. The
+argument \code{n\_grid} gives the number of normal quantiles per axis,
+\code{step} the number of grid steps over which the central differences are
+taken, and \code{boundary} the treatment of the edge of the grid: one-sided
+differences (\code{"clamp"}, the default), the Jacobian of the nearest interior
+grid point (\code{"nearest"}), or interior grid points only (\code{"trim"}). The
+defaults (two grid steps, about two observations per grid point and
+\code{"clamp"}) were the most accurate in a simulation with known $\bar J$.
+Note that the estimates can depend noticeably on these choices. Leaving out the
+edge of the grid (\code{"trim"}), for example, cuts off the normal tails, which
+here changes the eigenvalues considerably:
+
+<<choices>>=
+gspca(X, step = 1, boundary = "nearest", n_grid = 15)$eigenvalues
+gspca(X, boundary = "trim")$eigenvalues
+fit$eigenvalues
+@
+
+The optimal coupling uses a dense cost matrix of $n$ times $n_g^d$ entries, so
+that for large samples a smaller \code{n\_grid} should be chosen.
+
+\section*{References}
+
+{\raggedright
+\begin{list}{}{\setlength{\leftmargin}{1.5em}\setlength{\itemindent}{-1.5em}}
+\item Gunsilius, F. and Schennach, S. (2023). Independent nonlinear component
+  analysis. \emph{Journal of the American Statistical Association}, 118(542),
+  1305--1318. \href{https://doi.org/10.1080/01621459.2021.1990768}{doi:10.1080/01621459.2021.1990768}
+\end{list}
+}
+
+\end{document}

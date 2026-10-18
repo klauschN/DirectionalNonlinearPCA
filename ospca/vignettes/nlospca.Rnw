@@ -1,0 +1,304 @@
+\documentclass[11pt,a4paper]{article}
+%\VignetteIndexEntry{Nonlinear one-sided PCA}
+%\VignetteEngine{knitr::knitr}
+%\VignetteEncoding{UTF-8}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{parskip}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\pkg}[1]{\textbf{#1}}
+\setlength{\emergencystretch}{3em}
+\newcommand{\Qbar}{\overline{Q}_\pm^{(n)}}
+
+\title{Nonlinear one-sided PCA with the R package \pkg{ospca}}
+\author{}
+\date{\pkg{ospca} version \Sexpr{packageVersion("ospca")}}
+
+\begin{document}
+\maketitle
+
+<<setup, include = FALSE>>=
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", size = "small",
+                      fig.width = 8, fig.height = 4, out.width = "\\textwidth",
+                      fig.align = "center", fig.pos = "!htb")
+options(ospca.threads = 2, width = 80)
+@
+
+\section{Introduction}
+
+In the linear one-sided PCA of \code{ospca()} (see
+\code{vignette("ospca", package = "ospca")}), a direction $u$ describes the
+half-line $\{r u: r > 0\}$. The nonlinear one-sided PCA of \code{nlospca()}
+replaces this half-line by its image under the center-outward quantile function
+$Q_\pm$ of the distribution of $X$ (Hallin et al., 2021). The function $Q_\pm$
+is the gradient of a convex function that pushes the spherical uniform
+distribution on the open unit ball forward to the distribution of $X$. It maps
+the origin to the center, a multivariate median, and the sphere of radius $r$
+to the quantile contour of order $r$. The image of the half-line,
+$r \mapsto Q_\pm(r u)$, $0 < r < 1$, is the so-called sign curve of $u$. Then
+\begin{itemize}
+\item the principal directions maximize the expected squared length of the sign
+  curves, greedily over the directions orthogonal to the previous ones and their
+  antipodes, as in the linear case;
+\item the principal curves are the sign curves of the principal directions;
+\item the principal components are curvilinear projections onto these curves.
+\end{itemize}
+
+In the sample, the $n$ observations are optimally assigned to a regular grid in
+the unit ball, which consists of $n_S$ directions times $n_R$ radii
+$j / (n_R + 1)$, $j = 1, \ldots, n_R$, and $n_0$ copies of the origin, with
+$n = n_R n_S + n_0$. This gives the empirical center-outward quantile function
+$Q_\pm^{(n)}$ at the grid points, which is extended to the whole ball by a
+cyclically monotone interpolation $\Qbar$. As the empirical sign curves are
+rough, they are regularized by a Tikhonov filter before their lengths are
+computed. In this vignette we illustrate the method, its helper functions and
+its methods on a simple bivariate data set.
+
+\section{Data}
+
+The observations lie around a parabola, so that the data have two arms of
+different length:
+
+<<data>>=
+set.seed(1)
+x <- rnorm(400)
+X <- cbind(x1 = x, x2 = x^2 + rnorm(400, sd = 0.5))
+@
+
+\section{Fitting the model}
+
+<<fit>>=
+library(ospca)
+fit <- nlospca(X)
+fit
+@
+
+The grid is chosen automatically, with $n_R$ close to $\sqrt{n} / 2$; here
+$400 = 10 \cdot 39 + 10$. It can also be set by the arguments \code{nR} and
+\code{nS}. By default, all $2d = 4$ directions are kept. The summary also gives
+the settings and the diagnostics of the direction search:
+
+<<summary, size = "scriptsize">>=
+summary(fit)
+@
+
+A positive margin of the potentials means that the optimal assignment is
+strictly cyclically monotone, so that the interpolation is exact at the grid
+points. In the direction diagnostics, \code{gap} is the relative gap between the
+criterion of a direction and that of the best candidate more than 45 degrees
+away, and \code{tie} flags a gap below \code{tol\_tie}, in which case the
+maximizer is effectively not unique.
+
+Note that the principal directions are unit vectors in the unit ball, the space
+of the center-outward signs, and not in the space of the data:
+
+<<directions>>=
+directions(fit)
+@
+
+The second direction is orthogonal to the first, and the third and the fourth
+are the antipodes of the first two.
+
+\section{Principal curves}
+
+\code{plot()} draws the data together with the principal curves, which start at
+the center (black dot); see Figure~\ref{fig:plot}. The first curve follows the
+longer left arm, the second one the right arm, and the last two run into the
+bottom and the left of the central part of the data.
+
+<<plot, fig.width = 4.5, fig.height = 4.2, out.width = "0.55\\textwidth", fig.cap = "Data with the four principal curves, which start at the center (black dot).">>=
+plot(fit)
+@
+
+The curves are part of the fit (\code{fit\$curves}), and \code{nlos\_curve()}
+evaluates the regularized sign curve of any direction, starting at the center.
+For the direction pointing straight up, which lies between the first two
+principal directions, the curve runs into the right arm:
+
+<<curve>>=
+C_up <- nlos_curve(c(0, 1), fit)
+dim(C_up)
+tail(C_up, 3)
+@
+
+\section{The criterion}
+
+The criterion is the average, over the radii $r_j$, of the squared polygonal
+length of the regularized sign curve from the center to $r_j u$, where a
+proportion \code{delta} of the outer radii is left out. \code{nlos\_objective()}
+evaluates it for given directions, one per row. For the fitted directions, it
+reproduces the criterion values of the fit:
+
+<<objective>>=
+nlos_objective(t(directions(fit)), fit)
+fit$objective
+@
+
+Figure~\ref{fig:objective-plot} shows the criterion as a function of the angle
+of the direction, with the four principal directions marked. The second
+direction is the best one orthogonal to the first (or the antipode of the
+first), and so on.
+
+<<objective-plot, fig.height = 3.6, fig.cap = "Criterion as a function of the angle of the direction, with the four principal directions.">>=
+angle <- function(u) (atan2(u[[2]], u[[1]]) * 180 / pi) %% 360
+theta <- seq(0, 359.5, by = 0.5)
+U <- cbind(cos(theta * pi / 180), sin(theta * pi / 180))
+M <- nlos_objective(U, fit)
+plot(theta, M, type = "l", xlab = "angle of u (degrees)", ylab = "criterion",
+     ylim = c(0, 1.1 * max(M)))
+points(apply(directions(fit), 2, angle), fit$objective, pch = 19)
+text(apply(directions(fit), 2, angle), fit$objective, 1:4, pos = 3)
+@
+
+Note that the empirical criterion is rough, with narrow spikes. Therefore, the
+directions are found by a search over a dense grid of \code{mS} directions and
+not by a gradient method. By default, \code{mS} is the smallest multiple of
+\code{nS} that is at least $n$, here \Sexpr{fit$settings$mS}, so that the grid
+contains the directions of the target grid. A coarser grid, e.g., one with
+$4 n_S$ directions, misses the narrow spike at the first direction. In this
+example, however, the reconstruction error with the first direction (see
+Section~\ref{sec:reconstruction}) hardly changes:
+
+<<mS>>=
+fit_coarse <- nlospca(X, mS = 4 * fit$settings$nS)
+fit_coarse$objective
+c(reconstruction_mse(X, reconstruct(fit, n_components = 1)),
+  reconstruction_mse(X, reconstruct(fit_coarse, n_components = 1)))
+@
+
+\section{Quantile and distribution functions}
+
+\code{nlos\_quantile()} evaluates the interpolated empirical quantile function
+$\Qbar$ at points of the unit ball, and \code{nlos\_distribution()} evaluates
+the empirical center-outward distribution function, which maps a point of the
+data space to a point of the grid. The norm of this grid point is the
+center-outward rank of the observation, divided by $n_R + 1$. With the default
+\code{kappa = 0}, the interpolation is piecewise constant and returns the
+observations at their own grid points:
+
+<<quantile>>=
+G <- nlos_distribution(fit, X[1:4, ])
+G
+sqrt(rowSums(G^2)) * (fit$settings$nR + 1)    # center-outward ranks
+nlos_quantile(fit, G)
+X[1:4, ]
+@
+
+The images of circles of radius $r$ are the empirical quantile contours of order
+$r$ (Figure~\ref{fig:contours}). Note that they are closed curves around the
+center and therefore cross the region between the two arms, where there are no
+observations.
+
+<<contours, fig.width = 4.5, fig.height = 4.2, out.width = "0.55\\textwidth", fig.cap = "Empirical quantile contours of orders 0.25, 0.5 and 0.75.">>=
+plot(X, pch = 16, col = "grey70", asp = 1)
+circle <- cbind(cos(seq(0, 2 * pi, length.out = 200)),
+                sin(seq(0, 2 * pi, length.out = 200)))
+for (r in c(0.25, 0.5, 0.75)) lines(nlos_quantile(fit, r * circle), col = "navy")
+points(fit$center[1], fit$center[2], pch = 19)
+@
+
+\section{Scores of new observations}
+
+The scores are the lengths of the curvilinear projections onto the principal
+curves:
+
+<<scores>>=
+head(scores(fit))
+@
+
+\code{predict()} gives the scores of new observations. These are mapped to the
+grid by the cyclically monotone extension of the empirical distribution function
+and are then projected in the same way. A point on the left arm has its largest
+score for the first component, a point on the right arm for the second one, and
+a point below the center for the third one:
+
+<<predict>>=
+Xnew <- rbind(c(-2, 4), c(2, 4), c(0, -0.5))
+predict(fit, Xnew)
+@
+
+Note that the point on the right arm also has a sizable score for the first
+component, as the beginnings of the first two curves both rise from the center.
+
+\section{Reconstruction}\label{sec:reconstruction}
+
+\code{reconstruct()} projects the observations onto the nonlinear manifold given
+by the first $k$ principal curves, and \code{reconstruction\_mse()} gives the
+mean squared reconstruction error. With \code{smooth = FALSE} the unsmoothed
+curves are used, and with all $2d$ directions and \code{kappa = 0} the
+reconstruction is then exact, apart from the observations assigned to the
+origin, which are replaced by their mean.
+
+<<reconstruct>>=
+sapply(1:4, function(k) reconstruction_mse(X, reconstruct(fit, n_components = k)))
+sapply(1:4, function(k)
+  reconstruction_mse(X, reconstruct(fit, n_components = k, smooth = FALSE)))
+@
+
+\code{screeplot()} shows the criterion values (bars) together with the
+reconstruction errors (line), see Figure~\ref{fig:screeplot}, and
+\code{fitted()} and \code{residuals()} give the reconstructions and the data
+minus their reconstructions:
+
+<<screeplot, fig.width = 4.5, fig.height = 4, out.width = "0.55\\textwidth", fig.cap = "Criterion values (bars) and reconstruction errors (line).">>=
+screeplot(fit)
+@
+
+<<fitted>>=
+head(fitted(fit, n_components = 2))
+head(residuals(fit, n_components = 2))
+@
+
+\section{Tuning parameters}
+
+The Tikhonov parameter \code{eps} regularizes the sign curves whose lengths
+define the criterion. Without regularization (\code{eps = 0}), the empirical
+sign curves zigzag between the observations, and the criterion then rewards
+directions with long zigzags. In our example, the first curve then jumps
+between the two arms (Figure~\ref{fig:eps}).
+
+<<eps, fig.cap = "Principal curves without regularization (left) and with the default regularization (right).">>=
+fit0 <- nlospca(X, eps = 0)
+par(mfrow = c(1, 2))
+plot(fit0, main = "eps = 0")
+plot(fit, main = "eps = 0.5 (default)")
+@
+
+The other main arguments are:
+\begin{itemize}
+\item \code{eps\_curves}, the regularization of the returned curves and of the
+  projections, by default equal to \code{eps};
+\item \code{paths}, which decides whether the observation's own sign curve is
+  regularized in the same way (\code{"smooth"}, the default) or not
+  (\code{"raw"});
+\item \code{delta}, the proportion of the outer radii left out of the criterion;
+\item \code{kappa}, the Yosida regularization of the interpolation, with
+  \code{0} for the piecewise constant interpolation;
+\item \code{mR} and \code{mS}, the number of radii of the curves and the number
+  of directions searched;
+\item \code{ot\_method}, the optimal transport algorithm of the package
+  \pkg{transport};
+\item \code{nthreads}, the number of threads of the compiled code, which can
+  also be set by \code{options(ospca.threads = )}. In this vignette two threads
+  are used.
+\end{itemize}
+
+\section*{References}
+
+{\raggedright
+\begin{list}{}{\setlength{\leftmargin}{1.5em}\setlength{\itemindent}{-1.5em}}
+\item Hallin, M., del Barrio, E., Cuesta-Albertos, J. and Matr\'an, C. (2021).
+  Distribution and quantile functions, ranks and signs in dimension d: a
+  measure transportation approach. \emph{Annals of Statistics}, 49,
+  1139--1165. \href{https://doi.org/10.1214/20-AOS1996}{doi:10.1214/20-AOS1996}
+\item Hallin, M., Nordhausen, K. and Radojicic, U. Directional nonlinear
+  principal components: a measure transportation approach.
+\end{list}
+}
+
+\end{document}
