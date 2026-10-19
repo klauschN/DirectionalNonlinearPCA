@@ -57,14 +57,19 @@ ae_steps  <- NULL                     # NULL uses the default number of training
 nthreads  <- NULL                     # threads of the compiled code (NULL: all cores but one)
 make_html <- TRUE                     # also save the 3D figures as interactive web pages (needs
                                       # plotly and htmlwidgets)
+pt_cex    <- 0.6                      # size of the plotting symbols of the data in all figures
+text_width <- 7                       # text width of the manuscript in inches (geometry package:
+                                      # total = {7in, 9in}); the figures are drawn at the size at
+                                      # which they are included, see fig_pdf() below
+fig_pointsize <- 9                    # font size of the figures in points
 html_dir  <- "docs"                   # folder of the web pages, one page per figure and an index
                                       # page; in a GitHub repository, GitHub Pages can publish it
 res_dir   <- file.path(out_dir, "results")
                                       # the data and the fitted models are saved in this folder
 recompute <- FALSE                    # FALSE: results saved by an earlier run are reused, so that
-                                      # a second run only redraws the figures (in seconds). Set to
-                                      # TRUE, or delete the corresponding file in res_dir, after
-                                      # changing the data or the settings of a fit.
+                                      # a second run only redraws the figures (in seconds); a result
+                                      # is recomputed automatically when its code or settings have
+                                      # changed. TRUE recomputes everything.
 
 ## Simulated settings: n = nR * nS + n0 = 2561 with nR = 20, nS = 128 and n0 = 1.
 n_sim  <- 2561
@@ -73,7 +78,10 @@ nS_sim <- 128
 eps_sim <- c("1" = 0.5, "2" = 1.5, "3" = 1.5, "4" = 1.5, "5" = 1.5, "6" = 1)
                                       # Tikhonov parameter of the criterion, i.e., for the choice
                                       # of the directions (manuscript: 0.5, 0.5, 0.5, 2, 2 and 1)
-eps_curves_sim <- 1                   # Tikhonov parameter of the displayed curves
+eps_curves_sim <- 1                   # Tikhonov parameter of the curves of the fits
+eps_display_sim <- c("1" = 1, "2" = 2, "3" = 1, "4" = 1, "5" = 1, "6" = 1)
+                                      # Tikhonov parameter of the curves drawn in Figure 7; it only
+                                      # affects the drawing, so it can be changed without refitting
 delta_sim <- 0.1                      # trimming proportion of the criterion
 
 dir.create(out_dir, showWarnings = FALSE)
@@ -86,18 +94,37 @@ if (run_ae && !has_pkg("pcaMethods"))
 ## Helper functions
 ## ===========================================================================
 
+## Each figure is drawn at the size at which it is included in the manuscript, so
+## that its text has about the size of the text of the paper (fig_pointsize). A
+## figure drawn with width_frac = w is meant to be included with
+##   \includegraphics[width=w\textwidth]{...}
+## (the width is given for each figure below).
+fig_pdf <- function(file, width_frac, height) {
+  pdf(file.path(out_dir, file), width = width_frac * text_width, height = height,
+      pointsize = fig_pointsize)
+  par(mgp = c(1.8, 0.6, 0), tcl = -0.3)
+}
+
 ## The data and the fits of each example are saved in res_dir and reused in later
 ## runs, unless recompute is TRUE (see the settings above). The expression is
 ## only evaluated when no saved result is used.
+## Each result is saved together with the code that computes it and the
+## settings and functions it depends on (deps), and it is recomputed
+## automatically when one of these has changed since it was saved.
 dir.create(res_dir, recursive = TRUE, showWarnings = FALSE)
-cached <- function(name, expr) {
+cached <- function(name, expr, deps = list()) {
   f <- file.path(res_dir, paste0(name, ".rds"))
+  signature <- paste(c(deparse(substitute(expr)), deparse(deps)), collapse = "\n")
   if (!recompute && file.exists(f)) {
-    message("  (using the saved results in ", f, ")")
-    return(readRDS(f))
+    saved <- readRDS(f)
+    if (is.list(saved) && identical(saved$signature, signature)) {
+      message("  (using the saved results in ", f, ")")
+      return(saved$value)
+    }
+    message("  (the code or the settings have changed since the results were saved: recomputing)")
   }
   value <- expr
-  saveRDS(value, f)
+  saveRDS(list(value = value, signature = signature), f)
   value
 }
 
@@ -151,31 +178,51 @@ comparison_curves <- function(X, gs_eps_curves = 1, gs_scale = FALSE) {
   out
 }
 
-## Colors as in the figures of the manuscript.
-cols <- c(nlos = "blue", gs = "red", pca = "#008080", hs = "magenta", ae = "orange")
+## Each method has the same color in all figures: directional PCA (linear and
+## nonlinear) blue, classical PCA black, GS-PCA red, the principal curve magenta
+## and the autoencoder orange. The directions of directional PCA are numbered and
+## distinguished by the line types in lty_dir (solid, dashed, dotted, ...).
+cols <- c(nlos = "blue", gs = "red", pca = "black", hs = "magenta", ae = "orange")
 labs <- c(nlos = "directional PCA", gs = "GS-PCA", pca = "PCA",
           hs = "principal curve", ae = "autoencoder")
+lty_dir <- c(1, 2, 3, 4, 5, 6)
 
 ## Data together with the first two directional principal curves (solid and
 ## dashed) and the curves of the competing methods, for the coordinates i and j.
+## With eps_display, the directional curves are drawn with this Tikhonov
+## parameter instead of the one of the fit.
 draw_curves <- function(X, fit, cmp, main, i = 1, j = 2, xlim = NULL, ylim = NULL,
-                        xlab = colnames(X)[i], ylab = colnames(X)[j]) {
+                        xlab = colnames(X)[i], ylab = colnames(X)[j], eps_display = NULL) {
   if (is.null(xlim)) xlim <- range(X[, i])
   if (is.null(ylim)) ylim <- range(X[, j])
-  plot(X[, i], X[, j], pch = 16, cex = 0.3, col = "grey70", xlim = xlim, ylim = ylim,
+  plot(X[, i], X[, j], pch = 16, cex = pt_cex, col = "grey70", xlim = xlim, ylim = ylim,
        xlab = xlab, ylab = ylab, main = main)
   for (m in c("pca", "hs", "ae", "gs"))
     if (!is.null(cmp[[m]])) lines(cmp[[m]][, i], cmp[[m]][, j], col = cols[m], lwd = 2)
-  lines(fit$curves[[1]][, i], fit$curves[[1]][, j], col = cols["nlos"], lwd = 2.5)
-  lines(fit$curves[[2]][, i], fit$curves[[2]][, j], col = cols["nlos"], lwd = 2.5, lty = 2)
+  for (k in 1:2) {
+    C <- if (is.null(eps_display)) fit$curves[[k]]
+         else nlos_curve(directions(fit)[, k], fit, eps = eps_display)
+    lines(C[, i], C[, j], col = cols["nlos"], lwd = 2.5, lty = lty_dir[k])
+  }
 }
 
-## Legend below a figure with several panels.
-bottom_legend <- function() {
+## The directional principal curves `which` of a bivariate fit, numbered at
+## their ends, with the center as a black dot.
+draw_dir_curves <- function(fit, which = seq_along(fit$curves)) {
+  for (k in which) {
+    C <- fit$curves[[k]]
+    lines(C, col = cols["nlos"], lwd = 2.5, lty = lty_dir[k])
+    text(C[nrow(C), 1], C[nrow(C), 2], labels = k, col = cols["nlos"], pos = 3)
+  }
+  points(fit$center[1], fit$center[2], pch = 19)
+}
+
+## Legend below a figure with several panels, in `nrow` rows.
+bottom_legend <- function(nrow = 1) {
   par(fig = c(0, 1, 0, 1), oma = c(0, 0, 0, 0), mar = c(0, 0, 0, 0), new = TRUE)
   plot(0, 0, type = "n", bty = "n", xaxt = "n", yaxt = "n", xlab = "", ylab = "")
-  legend("bottom", legend = labs, col = cols, lwd = 2, lty = 1, horiz = TRUE,
-         bty = "n", cex = 0.9)
+  legend("bottom", legend = labs, col = cols, lwd = 2, lty = 1,
+         ncol = ceiling(length(labs) / nrow), bty = "n", cex = 0.9)
 }
 
 ## ===========================================================================
@@ -186,20 +233,20 @@ bottom_legend <- function() {
 ## (with the same random number generators, mvtnorm::rmvnorm() and
 ## MASS::mvrnorm()), so that the figures can be compared directly.
 
-## Arrows of the linear one-sided PCA (navy: the directions, with lengths
-## proportional to the one-sided objectives) and of classical PCA (red: the
+## Arrows of the linear one-sided PCA (blue: the directions, with lengths
+## proportional to the one-sided objectives) and of classical PCA (black: the
 ## eigenvectors, with lengths proportional to the eigenvalues), as in Figure 1.
 draw_arrows_2d <- function(Y, fit, os_scale = 1, pca_scale = 2, main = "") {
   ev <- eigen(stats::cov(Y), symmetric = TRUE)
   A_os <- t(directions(fit)) * (os_scale * fit$objective)
   A_pca <- t(ev$vectors) * (pca_scale * ev$values / 2)
   lims <- range(Y, 1.15 * A_os, 1.15 * A_pca)
-  plot(Y, pch = 16, cex = 0.3, col = "grey80", asp = 1, xlim = lims, ylim = lims,
+  plot(Y, pch = 16, cex = pt_cex, col = "grey80", asp = 1, xlim = lims, ylim = lims,
        xlab = "", ylab = "", main = main)
-  arrows(0, 0, A_pca[, 1], A_pca[, 2], col = "red", lwd = 2, length = 0.08)
-  text(1.12 * A_pca, labels = seq_len(nrow(A_pca)), col = "red", cex = 0.9)
-  arrows(0, 0, A_os[, 1], A_os[, 2], col = "navy", lwd = 2, length = 0.08)
-  text(1.12 * A_os, labels = seq_len(nrow(A_os)), col = "navy", cex = 0.9)
+  arrows(0, 0, A_pca[, 1], A_pca[, 2], col = cols["pca"], lwd = 1.3, length = 0.06)
+  text(1.12 * A_pca, labels = seq_len(nrow(A_pca)), col = cols["pca"], cex = 0.9)
+  arrows(0, 0, A_os[, 1], A_os[, 2], col = cols["nlos"], lwd = 1.3, length = 0.06)
+  text(1.12 * A_os, labels = seq_len(nrow(A_os)), col = cols["nlos"], cex = 0.9)
 }
 
 ## Reconstructions with k = 1, ..., 2d directions (one row of Figure 3).
@@ -207,7 +254,7 @@ draw_reconstructions_2d <- function(Y, fit) {
   for (k in seq_len(2 * ncol(Y))) {
     RC <- reconstruct(fit, n_components = k, add_center = FALSE)
     mse <- reconstruction_mse(Y, RC)
-    plot(RC, pch = 16, cex = 0.3, col = "darkgray", asp = 1, xlim = range(Y[, 1]),
+    plot(RC, pch = 16, cex = pt_cex, col = "darkgray", asp = 1, xlim = range(Y[, 1]),
          ylim = range(Y[, 2]), xlab = "", ylab = "",
          main = paste0("k = ", k, ", MSE = ", if (round(mse, 4) == 0) "0" else round(mse, 3)))
   }
@@ -242,17 +289,19 @@ if (has_pkg("mvtnorm")) {
   ## lengths of the arrows in Figure 1 (one-sided, classical), per example
   arrow_scales <- list(c(1, 2), c(1, 2), c(2, 4))
 
-  ## Figure 1: one-sided and classical principal directions
-  pdf(file.path(out_dir, "linear_directions_2d.pdf"), width = 12, height = 4.5)
-  par(mfrow = c(1, 3), mar = c(2.5, 2.5, 2.5, 1))
+  ## Figure 1 (width = \textwidth): one-sided and classical principal directions,
+  ## the three examples side by side (no panel titles: the examples are referred
+  ## to as the left, middle and right panel in the caption)
+  fig_pdf("linear_directions_2d.pdf", 1, 2.55)
+  par(mfrow = c(1, 3), mar = c(2.2, 2.2, 0.5, 0.5))
   for (i in seq_along(lin2d))
-    draw_arrows_2d(lin2d[[i]]$Y, lin2d[[i]]$fit, arrow_scales[[i]][1], arrow_scales[[i]][2],
-                   main = paste0("(", tolower(as.roman(i)), ")"))
+    draw_arrows_2d(lin2d[[i]]$Y, lin2d[[i]]$fit, arrow_scales[[i]][1], arrow_scales[[i]][2])
   dev.off()
 
-  ## Figure 3: reconstructions with k = 1, ..., 4 one-sided directions
-  pdf(file.path(out_dir, "linear_reconstructions_2d.pdf"), width = 10, height = 8)
-  par(mfrow = c(3, 4), mar = c(2.5, 2.5, 2.5, 1))
+  ## Figure 3 (width = \textwidth): reconstructions with k = 1, ..., 4 one-sided
+  ## directions, one row per example
+  fig_pdf("linear_reconstructions_2d.pdf", 1, 5.6)
+  par(mfrow = c(3, 4), mar = c(2.2, 2.2, 1.6, 0.5))
   for (i in seq_along(lin2d)) with(lin2d[[i]], draw_reconstructions_2d(Y, fit))
   dev.off()
 
@@ -282,26 +331,31 @@ fit_3d <- ex_3d$fit
 print(fit_3d)
 
 ## Static view of points in three dimensions inside the box lim^3, with arrows
-## from the origin; the arrows in A are drawn in navy and those in B in red.
-## Points outside the box are not drawn, and arrows are shortened, if
-## necessary, so that they end within the fraction `clip` of the box.
-draw_3d <- function(P, lim, A = NULL, B = NULL, clip = 1, main = "", theta = 45, phi = 20) {
+## from the origin; the arrows in A (one-sided directions) are drawn in blue and
+## those in B (classical PCA) in black. Points outside the box are not drawn, and
+## arrows are shortened, if necessary, so that they end within the fraction
+## `clip` of the box.
+## The labels of the arrows in A are placed at the side label_pos of the tips
+## (one value per arrow, recycled; 1 below, 2 left, 3 above, 4 right).
+draw_3d <- function(P, lim, A = NULL, B = NULL, clip = 1, main = "", theta = 45, phi = 20,
+                    label_cex = 0.75, label_font = 1, label_pos = 3) {
   pm <- persp(lim, lim, matrix(NA, 2, 2), zlim = lim, theta = theta, phi = phi,
               xlab = "X1", ylab = "X2", zlab = "X3", main = main, border = NA,
               ticktype = "simple", cex.main = 0.9)
   inside <- rowSums(P < lim[1] | P > lim[2]) == 0
-  points(trans3d(P[inside, 1], P[inside, 2], P[inside, 3], pm), pch = 16, cex = 0.2,
-         col = "grey60")
+  points(trans3d(P[inside, 1], P[inside, 2], P[inside, 3], pm), pch = 16,
+         cex = 0.6 * pt_cex, col = "grey60")
   o <- trans3d(0, 0, 0, pm)
-  for (M in list(list(A, "navy"), list(B, "red"))) {
+  for (M in list(list(A, cols[["nlos"]], label_pos), list(B, cols[["pca"]], 3))) {
     if (is.null(M[[1]])) next
+    pos <- rep_len(M[[3]], nrow(M[[1]]))
     for (i in seq_len(nrow(M[[1]]))) {
       a <- M[[1]][i, ]
       s <- ifelse(a > 0, clip * lim[2] / a, ifelse(a < 0, clip * lim[1] / a, Inf))
       a <- a * min(1, s)
       e <- trans3d(a[1], a[2], a[3], pm)
       arrows(o$x, o$y, e$x, e$y, col = M[[2]], lwd = 1.5, length = 0.07)
-      text(e$x, e$y, labels = i, col = M[[2]], cex = 0.75, pos = 3)
+      text(e$x, e$y, labels = i, col = M[[2]], cex = label_cex, font = label_font, pos = pos[i])
     }
   }
 }
@@ -310,22 +364,26 @@ ev_3d <- eigen(stats::cov(Y_3d), symmetric = TRUE)
 A_3d <- t(directions(fit_3d)) * (fit_3d$objective / 6)     # one-sided directions
 B_3d <- t(ev_3d$vectors) * (ev_3d$values / 2 / 12)         # classical PCA
 
-## Figure 2: the data with the one-sided (navy) and classical (red) directions
-pdf(file.path(out_dir, "linear_directions_3d.pdf"), width = 7, height = 7)
-par(mar = c(1, 1, 2, 1))
-draw_3d(Y_3d, range(Y_3d, 1.1 * A_3d, 1.1 * B_3d), A = A_3d, B = B_3d,
-        main = "Directional and classical PCA")
+## Figure 2 (width = 0.7\textwidth): the data with the one-sided (blue) and
+## classical (black) directions; for the manuscript, a snapshot of the interactive
+## version (see the end of the script) may be preferable
+fig_pdf("linear_directions_3d.pdf", 0.7, 4.6)
+par(mar = c(0.5, 0.5, 0.5, 0.5))
+draw_3d(Y_3d, range(Y_3d, 1.1 * A_3d, 1.1 * B_3d), A = A_3d, B = B_3d)
 dev.off()
 
-## Figure 4: reconstructions with k = 1, ..., 6 one-sided directions
+## Figure 4 (width = 0.9\textwidth): reconstructions with k = 1, ..., 6
+## one-sided directions
 lim_3d <- c(min(Y_3d), max(Y_3d)) / 2
-pdf(file.path(out_dir, "linear_reconstructions_3d.pdf"), width = 9, height = 6)
-par(mfrow = c(2, 3), mar = c(1, 0.5, 2, 0.5))
+fig_pdf("linear_reconstructions_3d.pdf", 0.9, 4.3)
+par(mfrow = c(2, 3), mar = c(0.5, 0.3, 1.6, 0.3))
 for (k in 1:6) {
   RC <- reconstruct(fit_3d, n_components = k, add_center = FALSE)
   mse <- reconstruction_mse(Y_3d, RC)
   draw_3d(RC, lim_3d, A = A_3d[seq_len(k), , drop = FALSE], clip = 0.8,
-          main = paste0("k = ", k, ", MSE = ", if (round(mse, 4) == 0) "0" else round(mse, 3)))
+          main = paste0("k = ", k, ", MSE = ", if (round(mse, 4) == 0) "0" else round(mse, 3)),
+          label_cex = 1, label_font = 2,       # bold numbers of the directions
+          label_pos = c(3, 3, 3, 3, 3, 1))     # the label of direction 6 below its tip
 }
 dev.off()
 cat("Trivariate example: MSE one-sided k = 1, ..., 6:",
@@ -347,34 +405,40 @@ banana <- cached("section2_4_banana", {
   X <- cbind(X = x_b, Y = (0.4 * x_b)^2 + rnorm(n_sim, sd = 0.5))
   list(X = X, fit = nlospca(X, nR = nR_sim, nS = nS_sim, eps = eps_sim[["1"]],
                             eps_curves = eps_curves_sim, delta = delta_sim, nthreads = nthreads))
-})
+}, deps = list(n_sim, nR_sim, nS_sim, eps_sim[["1"]], eps_curves_sim, delta_sim))
 X_b <- banana$X
 fit_b <- banana$fit
 print(fit_b)
-col4 <- c("navy", "#c0392b", "#27ae60", "#8e44ad")
 mse_b <- sapply(1:4, function(k) reconstruction_mse(X_b, reconstruct(fit_b, n_components = k)))
 
-## the data with the four directional principal curves
-pdf(file.path(out_dir, "nonlinear_banana_curves.pdf"), width = 6, height = 5)
-par(mar = c(4, 4, 2.5, 1))
-plot(X_b, pch = 16, cex = 0.3, col = "grey70", main = "Directional principal curves")
-for (k in 1:4) {
-  C <- fit_b$curves[[k]]
-  lines(C, col = col4[k], lwd = 2.5)
-  text(C[nrow(C), 1], C[nrow(C), 2], labels = k, col = col4[k], pos = 3)
+## Projections of the bivariate data X onto the manifold spanned by the first k
+## directional principal curves (medium grey), together with the data (light
+## grey) and the curves.
+## With newdata = TRUE, X are not the observations of the fit, and their
+## projections are computed as for new observations.
+draw_reduction <- function(X, fit, k, main, newdata = FALSE, ...) {
+  P <- if (newdata) reconstruct(fit, newdata = X, n_components = k)
+       else reconstruct(fit, n_components = k)
+  plot(X, pch = 16, cex = pt_cex, col = "grey85", main = main, ...)
+  points(P, pch = 16, cex = pt_cex, col = "grey55")
+  for (j in seq_len(k))
+    lines(fit$curves[[j]], col = cols["nlos"], lwd = 2.5, lty = lty_dir[j])
 }
-points(fit_b$center[1], fit_b$center[2], pch = 19)
+
+## Figure 5, top (width = 0.4\textwidth): the data with the four directional
+## principal curves
+fig_pdf("nonlinear_banana_curves.pdf", 0.4, 2.5)
+par(mar = c(2.8, 2.8, 0.5, 0.5))
+plot(X_b, pch = 16, cex = pt_cex, col = "grey70")
+draw_dir_curves(fit_b)
 dev.off()
 
-## the projections onto the manifolds spanned by the first k principal curves
-pdf(file.path(out_dir, "nonlinear_banana_reduction.pdf"), width = 10, height = 8)
-par(mfrow = c(2, 2), mar = c(4, 4, 2.5, 1))
-for (k in 1:4) {
-  plot(X_b, pch = 16, cex = 0.3, col = "grey80",
-       main = paste0("k = ", k, ", MSE = ", round(mse_b[k], 3)))
-  points(reconstruct(fit_b, n_components = k), pch = 16, cex = 0.3, col = cols["nlos"])
-  for (j in seq_len(k)) lines(fit_b$curves[[j]], col = col4[j], lwd = 2)
-}
+## Figure 5, bottom (width = 0.65\textwidth): the projections onto the manifolds
+## spanned by the first k principal curves
+fig_pdf("nonlinear_banana_reduction.pdf", 0.65, 3.9)
+par(mfrow = c(2, 2), mar = c(2.8, 2.8, 1.6, 0.5))
+for (k in 1:4)
+  draw_reduction(X_b, fit_b, k, main = paste0("k = ", k, ", MSE = ", round(mse_b[k], 3)))
 dev.off()
 cat("Section 2.4 (banana): MSE k = 1, ..., 4:", round(mse_b, 3), "\n")
 
@@ -382,8 +446,11 @@ cat("Section 2.4 (banana): MSE k = 1, ..., 4:", round(mse_b, 3), "\n")
 ## Section 5.1: simulated examples
 ## ===========================================================================
 
-## Data-generating mechanisms of the six settings, as described in the
-## manuscript. Note that N(0, 0.25) and N(0, 0.1) denote variances.
+## Data-generating mechanisms of the six settings. Settings 1, 3 and 6 are as
+## described in the manuscript, Settings 2, 4 and 5 as in the code of the
+## published figure (and in U. Radojicic's scripts), for which the smoothing
+## parameters eps_sim were tuned; the text of the manuscript should describe
+## these. Note that N(0, 0.25) denotes the variance.
 sim_data <- function(setting, n) {
   X <- switch(setting,
     ## Setting 1: banana-shaped distribution
@@ -391,14 +458,17 @@ sim_data <- function(setting, n) {
       x1 <- runif(n, -4, 4)
       cbind(x1, (0.4 * x1)^2 + rnorm(n, sd = 0.5))
     },
-    ## Setting 2: noisy banana, standardized by the inverse square root of the
-    ## (sample) covariance matrix
+    ## Setting 2: noisy banana, as in the code of the figure (and in U. Radojicic's
+    ## scripts): 2001 points of a banana with X1 ~ U(-6, 6) and 560 points of
+    ## uniform noise on [-7, 7] times the range of the banana, standardized and
+    ## whitened (multiplied by the inverse square root of the covariance matrix)
     "2" = {
-      b <- rbinom(n, 1, 0.72)
-      x1 <- runif(n, -4, 4)
-      banana <- cbind(x1, (0.4 * x1)^2 + rnorm(n, sd = 0.5))
-      noise <- cbind(runif(n, -7, 7), runif(n, -2, 7))
-      W <- b * banana + (1 - b) * noise
+      stopifnot(n == 2561)
+      set.seed(1)
+      x1 <- runif(2001, -6, 6)
+      x2 <- (0.4 * x1)^2 + 0.5 * rnorm(2001)
+      noise <- cbind(runif(560, -7, 7), runif(560, round(min(x2)), round(max(x2))))
+      W <- scale(rbind(cbind(x1, x2), noise))
       W %*% inv_sqrt(stats::cov(W))
     },
     ## Setting 3: exponential transformation of a Gaussian vector
@@ -407,20 +477,21 @@ sim_data <- function(setting, n) {
       y2 <- exp(x1 + x2)
       cbind(y2 + x1, y2)
     },
-    ## Setting 4: sigmoid-shaped distribution
+    ## Setting 4: sigmoid-shaped distribution, as in the code of the figure: the
+    ## logit of U(0, 1) variables plus 0.4 times t_5 noise, centered
     "4" = {
-      x <- runif(n, -7, 7)
-      cbind(x, 1 / (1 + exp(-x)) + rnorm(n, sd = sqrt(0.1)))
+      x1 <- runif(n, 0, 1)
+      x2 <- log(abs(x1 / (x1 - 1))) + 0.4 * rt(n, 5)
+      sweep(cbind(x1, x2), 2, colMeans(cbind(x1, x2)))
     },
-    ## Setting 5: two-component Gaussian mixture with a nonlinear transformation of
-    ## the first component. The manuscript does not state the mixing proportion;
-    ## 1200 of the 2561 observations are taken from the first component, as in the
-    ## code for the figure.
+    ## Setting 5: two-component Gaussian mixture, as in the code of the figure:
+    ## 1200 observations from N((3, 3), Sigma_1), squared componentwise, and 1361
+    ## from N((1, -1), Sigma_2) multiplied by 5, standardized
     "5" = {
-      n1 <- 1200
-      Z1 <- rmvn(n1, c(3, 3), matrix(c(1.5, 1, 1, 1.5), 2))^2
-      Z2 <- rmvn(n - n1, c(5, -5), matrix(c(10, 10, 10, 45), 2))
-      rbind(Z1, Z2)
+      rnorm2 <- if (has_pkg("mvtnorm")) mvtnorm::rmvnorm else rmvn
+      Z1 <- rnorm2(1200, c(3, 3), matrix(c(1.5, 1, 1, 1.5), 2))^2
+      Z2 <- 5 * rnorm2(n - 1200, c(1, -1), matrix(2 * c(0.2, -0.2, -0.2, 0.9), 2))
+      scale(rbind(Z1, Z2))
     },
     ## Setting 6: noisy bird-shaped distribution. The foreground pixels of the
     ## thresholded image are sampled uniformly, and each sampled point is placed
@@ -447,8 +518,9 @@ sim_data <- function(setting, n) {
 setting_names <- c("1" = "Setting 1: banana", "2" = "Setting 2: noisy banana",
                    "3" = "Setting 3: exponential transformation", "4" = "Setting 4: sigmoid",
                    "5" = "Setting 5: Gaussian mixture", "6" = "Setting 6: noisy bird")
-## plot window for the heavy-tailed Setting 3 (the other settings use the data range)
-windows <- list("3" = list(xlim = c(-2, 4), ylim = c(-0.5, 5)))
+## plot windows for the heavy-tailed Settings 3 and 4, as in the published figure
+## (the other settings use the range of the data)
+windows <- list("3" = list(xlim = c(-2, 4), ylim = c(-0.5, 5)), "4" = list(xlim = c(-0.6, 0.6)))
 
 settings <- c("1", "2", "3", "4", "5", "6")
 if (!(file.exists(bird_file) && has_pkg("png"))) {
@@ -465,14 +537,18 @@ for (s in settings) {
     fit <- nlospca(X, nR = nR_sim, nS = nS_sim, eps = eps_sim[[s]],
                    eps_curves = eps_curves_sim, delta = delta_sim, nthreads = nthreads)
     list(X = X, fit = fit, cmp = comparison_curves(X))
-  })
+  }, deps = list(n_sim, nR_sim, nS_sim, eps_sim[[s]], eps_curves_sim, delta_sim,
+                sim_data, comparison_curves, run_ae, ae_steps,
+                if (s == "6") bird_file))
 }
 
-pdf(file.path(out_dir, "simulated_settings.pdf"), width = 10, height = 13)
-par(mfrow = c(3, 2), oma = c(3, 0, 0, 0), mar = c(4, 4, 2.5, 1))
+## Figure 7 (width = \textwidth): the six settings
+fig_pdf("simulated_settings.pdf", 1, 8.2)
+par(mfrow = c(3, 2), oma = c(2, 0, 0, 0), mar = c(2.8, 2.8, 1.6, 0.5))
 for (s in names(sim))
   with(sim[[s]], draw_curves(X, fit, cmp, main = setting_names[s],
-                             xlim = windows[[s]]$xlim, ylim = windows[[s]]$ylim))
+                             xlim = windows[[s]]$xlim, ylim = windows[[s]]$ylim,
+                             eps_display = eps_display_sim[[s]]))
 bottom_legend()
 dev.off()
 
@@ -493,46 +569,62 @@ old_faithful <- cached("section5_2_old_faithful", {
   set.seed(1)
   X <- break_ties(X0[sample(nrow(X0), 2561, replace = TRUE), ])
   rownames(X) <- NULL
+  ## The criterion evaluates the curves at mR = 60 radii, three times the radii of
+  ## the target grid. With the default mR = nR = 20, the second direction was
+  ## orthogonal to the first for all six resamples we tried, so that the first two
+  ## curves both lead into the cluster of short eruptions. With mR = 60 and eps = 2
+  ## (the value in the manuscript), the second direction was the antipode of the
+  ## first for all six resamples, and the first two curves lead into the two
+  ## clusters, as in the figure of the manuscript (eps = 4 gave this for five of
+  ## the six).
   list(X0 = X0, X = X,
-       fit = nlospca(X, nR = 20, nS = 128, eps = 4, delta = 0, nthreads = nthreads),
-                                      # manuscript: alpha = 2 in the earlier implementation
+       fit = nlospca(X, nR = 20, nS = 128, mR = 60, eps = 2, delta = 0, nthreads = nthreads),
        cmp = comparison_curves(X0))
-})
+}, deps = list(break_ties, comparison_curves, run_ae, ae_steps))
 X_of <- old_faithful$X
 fit_of <- old_faithful$fit
 cmp_of <- old_faithful$cmp
 print(fit_of)
 
-## comparison of the methods
-pdf(file.path(out_dir, "old_faithful_comparison.pdf"), width = 7, height = 7.5)
-par(oma = c(3, 0, 0, 0), mar = c(4, 4, 2.5, 1))
-draw_curves(X_of, fit_of, cmp_of, main = "Old Faithful",
-            xlab = "eruption duration (min)", ylab = "waiting time (min)")
-bottom_legend()
+## The figures show the 272 original observations (the resampled data contain
+## mostly copies of them), and the reconstruction errors are computed for these.
+X_of0 <- old_faithful$X0
+lab_of <- c("eruption duration (min)", "waiting time (min)")
+
+## Figure 8 (width = 0.7\textwidth): comparison of the methods (with the legend
+## in two rows)
+fig_pdf("old_faithful_comparison.pdf", 0.7, 4.6)
+par(oma = c(3, 0, 0, 0), mar = c(2.8, 2.8, 0.5, 0.5))
+draw_curves(X_of0, fit_of, cmp_of, main = "", xlab = lab_of[1], ylab = lab_of[2])
+bottom_legend(nrow = 2)
 dev.off()
 
-## the four directional principal curves, and the dimension reduction by the
-## projection onto the manifold spanned by the first two principal curves
-## (plot(fit_of) would use equal scales on both axes, which is not suitable here,
-## as the two variables have quite different ranges)
-pdf(file.path(out_dir, "old_faithful_reduction.pdf"), width = 11, height = 5.5)
-par(mfrow = c(1, 2), mar = c(4, 4, 2.5, 1))
-col4 <- c("navy", "#c0392b", "#27ae60", "#8e44ad")
-plot(X_of, pch = 16, cex = 0.3, col = "grey70", xlab = "eruption duration (min)",
-     ylab = "waiting time (min)", main = "Directional principal curves")
-for (k in 1:4) {
-  C <- fit_of$curves[[k]]
-  lines(C, col = col4[k], lwd = 2.5)
-  text(C[nrow(C), 1], C[nrow(C), 2], labels = k, col = col4[k], pos = 3)
-}
-points(fit_of$center[1], fit_of$center[2], pch = 19)
-P2 <- reconstruct(fit_of, n_components = 2)
-plot(X_of, pch = 16, cex = 0.3, col = "grey70", xlab = "eruption duration (min)",
-     ylab = "waiting time (min)", main = "Dimension reduction (k = 2)")
-points(P2, pch = 16, cex = 0.4, col = cols["nlos"])
+## Figure 9, left (width = 0.48\textwidth): the four directional principal
+## curves (plot(fit_of) would use equal scales on both axes, which is not
+## suitable here, as the two variables have quite different ranges)
+fig_pdf("old_faithful_curves.pdf", 0.48, 3.3)
+par(mar = c(2.8, 2.8, 0.5, 0.5))
+## room above the highest curve for its label
+ylim_of <- range(X_of0[, 2], sapply(fit_of$curves, function(C) C[, 2]))
+plot(X_of0, pch = 16, cex = pt_cex, col = "grey70", xlab = lab_of[1], ylab = lab_of[2],
+     ylim = ylim_of + c(0, 0.05) * diff(ylim_of))
+draw_dir_curves(fit_of)
 dev.off()
-cat("Old Faithful, reconstruction errors for k = 1, ..., 4:",
-    round(sapply(1:4, function(k) reconstruction_mse(X_of, reconstruct(fit_of, n_components = k))), 3), "\n")
+
+## Figure 9 (2): the projections onto the manifolds spanned by the first k
+## principal curves, k = 1, ..., 4
+mse_of <- sapply(1:4, function(k)
+  reconstruction_mse(X_of0, reconstruct(fit_of, newdata = X_of0, n_components = k)))
+## Figure 9, right (width = 0.48\textwidth); the panels are small, so the axis
+## labels are left out (they are those of the left panel)
+fig_pdf("old_faithful_reduction.pdf", 0.48, 3.3)
+par(mfrow = c(2, 2), mar = c(1.8, 1.8, 1.4, 0.3))
+for (k in 1:4)
+  draw_reduction(X_of0, fit_of, k, newdata = TRUE, xlab = "", ylab = "",
+                 main = paste0("k = ", k, ", MSE = ", round(mse_of[k], 2)))
+dev.off()
+cat("Old Faithful, reconstruction errors (original observations) for k = 1, ..., 4:",
+    round(mse_of, 3), "\n")
 
 ## ===========================================================================
 ## Section 5.3: Gvessel
@@ -564,27 +656,34 @@ if (has_pkg("LPCM")) {
          fit = nlospca(X, nR = 40, nS = 100, eps = 2, delta = 0, nthreads = nthreads),
                                       # manuscript: alpha = 1 in the earlier implementation
          cmp = comparison_curves(X0, gs_scale = TRUE))
-  })
+  }, deps = list(break_ties, comparison_curves, run_ae, ae_steps))
   X_gv <- gv$X
   fit_gv <- gv$fit
   cmp_gv <- gv$cmp
   print(fit_gv)
 
+  ## As for Old Faithful, the figures show the 643 original observations.
+  X_gv0 <- gv$X0
   pairs_3 <- list(c(1, 2), c(1, 3), c(2, 3))
-  pdf(file.path(out_dir, "gvessel_comparison.pdf"), width = 15, height = 5.5)
-  par(mfrow = c(1, 3), oma = c(3, 0, 0, 0), mar = c(4, 4, 2.5, 1))
+  ## Figure 10 (width = \textwidth): the three pairs of variables
+  fig_pdf("gvessel_comparison.pdf", 1, 2.9)
+  par(mfrow = c(1, 3), oma = c(2, 0, 0, 0), mar = c(2.8, 2.8, 0.5, 0.5))
   for (p in pairs_3)
-    draw_curves(X_gv, fit_gv, cmp_gv, main = "Gvessel", i = p[1], j = p[2])
+    draw_curves(X_gv0, fit_gv, cmp_gv, main = "", i = p[1], j = p[2])
   bottom_legend()
   dev.off()
 
-  ## projection onto the manifold spanned by the first two principal curves
-  P2_gv <- reconstruct(fit_gv, n_components = 2)
-  pdf(file.path(out_dir, "gvessel_reduction.pdf"), width = 15, height = 5)
-  par(mfrow = c(1, 3), mar = c(4, 4, 2.5, 1))
+  ## projections onto the manifold spanned by the first two principal curves
+  ## (medium grey), with the data (light grey) and the two curves
+  P2_gv <- reconstruct(fit_gv, newdata = X_gv0, n_components = 2)
+  ## (width = \textwidth)
+  fig_pdf("gvessel_reduction.pdf", 1, 2.5)
+  par(mfrow = c(1, 3), mar = c(2.8, 2.8, 0.5, 0.5))
   for (p in pairs_3) {
-    plot(X_gv[, p], pch = 16, cex = 0.3, col = "grey70", main = "Dimension reduction (k = 2)")
-    points(P2_gv[, p], pch = 16, cex = 0.4, col = cols["nlos"])
+    plot(X_gv0[, p], pch = 16, cex = pt_cex, col = "grey85")
+    points(P2_gv[, p], pch = 16, cex = pt_cex, col = "grey55")
+    for (j in 1:2)
+      lines(fit_gv$curves[[j]][, p], col = cols["nlos"], lwd = 2, lty = lty_dir[j])
   }
   dev.off()
 } else {
@@ -652,18 +751,18 @@ if (make_html && has_pkg("plotly") && has_pkg("htmlwidgets")) {
   lim_html <- range(Y_3d, 1.15 * A_3d, 1.15 * B_3d)
   head_html <- 0.04 * diff(lim_html)      # length of the arrow heads
 
-  ## Figure 2: the data with the one-sided (navy) and classical (red) directions
+  ## Figure 2: the data with the one-sided (blue) and classical (black) directions
   p2 <- plotly::plot_ly()
   p2 <- plotly::add_trace(p2, type = "scatter3d", mode = "markers", x = Y_3d[, 1],
                           y = Y_3d[, 2], z = Y_3d[, 3], name = "data", hoverinfo = "skip",
-                          marker = list(size = 1.5, color = "grey"))
-  p2 <- add_arrows_3d(p2, A_3d, "navy", "one-sided PCA", head_html)
-  p2 <- add_arrows_3d(p2, B_3d, "red", "classical PCA", head_html)
+                          marker = list(size = 2.5 * pt_cex, color = "grey"))
+  p2 <- add_arrows_3d(p2, A_3d, cols[["nlos"]], "one-sided PCA", head_html)
+  p2 <- add_arrows_3d(p2, B_3d, cols[["pca"]], "classical PCA", head_html)
   p2 <- plotly::layout(p2, title = "Directional and classical PCA", scene = scene_3d(lim_html),
                        margin = list(l = 0, r = 0, b = 0, t = 40))
   save_html(p2, "linear_directions_3d.html", "Directional and classical PCA")
   pages["linear_directions_3d.html"] <- paste("Trivariate example: the data with the",
-    "one-sided (navy) and classical (red) principal directions")
+    "one-sided (blue) and classical (black) principal directions")
 
   ## Figure 4: the reconstructions with k = 1, ..., 6 directions; the buttons
   ## switch between the values of k
@@ -675,8 +774,8 @@ if (make_html && has_pkg("plotly") && has_pkg("htmlwidgets")) {
     mse_html[k] <- reconstruction_mse(Y_3d, RC)
     p4 <- plotly::add_trace(p4, type = "scatter3d", mode = "markers", x = RC[, 1],
                             y = RC[, 2], z = RC[, 3], hoverinfo = "skip", visible = k == 1,
-                            marker = list(size = 1.5, color = "grey"), showlegend = FALSE)
-    p4 <- add_arrows_3d(p4, A_3d[seq_len(k), , drop = FALSE], "navy", "one-sided PCA",
+                            marker = list(size = 2.5 * pt_cex, color = "grey"), showlegend = FALSE)
+    p4 <- add_arrows_3d(p4, A_3d[seq_len(k), , drop = FALSE], cols[["nlos"]], "one-sided PCA",
                         head_html, visible = k == 1, showlegend = FALSE)
     group <- c(group, rep(k, 3))            # points, arrows, labels
   }
@@ -701,7 +800,7 @@ if (make_html && has_pkg("plotly") && has_pkg("htmlwidgets")) {
     pg <- plotly::plot_ly()
     pg <- plotly::add_trace(pg, type = "scatter3d", mode = "markers", x = X0[, 1],
                             y = X0[, 2], z = X0[, 3], name = "data", hoverinfo = "skip",
-                            marker = list(size = 2, color = "grey"))
+                            marker = list(size = 3 * pt_cex, color = "grey"))
     for (m in c("pca", "hs", "ae", "gs"))
       if (!is.null(cmp_gv[[m]]))
         pg <- plotly::add_trace(pg, type = "scatter3d", mode = "lines", x = cmp_gv[[m]][, 1],
