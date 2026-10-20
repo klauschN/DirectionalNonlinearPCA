@@ -7,8 +7,8 @@
 ## principal components of Section 2.2 (three bivariate examples and a
 ## trivariate one, Figures 1 to 4), the first illustration of nonlinear
 ## directional PCA in Section 2.4 (the banana), the six simulated settings of
-## Section 5.1, the Old Faithful data of Section 5.2 and the Gvessel data of
-## Section 5.3. Only the figure of Section 3.1 (the grid and the empirical
+## Section 5.1, and the Old Faithful data, the Hertzsprung-Russell diagram of the
+## Hipparcos stars and the Gvessel data of Section 5.2. Only the figure of Section 3.1 (the grid and the empirical
 ## quantile contours of a mixture of three bivariate Gaussians) is not included,
 ## as the mixture is not specified in the manuscript. The statistics reported in
 ## the text (the MSE values) are printed in the console. In
@@ -21,8 +21,9 @@
 ## (and MASS, which comes with R), and the comparisons of Section 5 need the
 ## packages princurve (CRAN) and pcaMethods (Bioconductor, installed with
 ## BiocManager::install("pcaMethods")). The Gvessel data are contained in the
-## package LPCM, and Setting 6 needs the package png together with the image of
-## the bird silhouette. Missing packages or files are reported, and the
+## package LPCM, the Hipparcos data in the package astrodatR (archived on CRAN,
+## see the Hertzsprung-Russell example), and Setting 6 needs the package png
+## together with the image of the bird silhouette. Missing packages or files are reported, and the
 ## corresponding parts are skipped.
 ##
 ## Run the script with the working directory set to its folder (in RStudio, for
@@ -79,9 +80,13 @@ eps_sim <- c("1" = 0.5, "2" = 1.5, "3" = 1.5, "4" = 1.5, "5" = 1.5, "6" = 1)
                                       # Tikhonov parameter of the criterion, i.e., for the choice
                                       # of the directions (manuscript: 0.5, 0.5, 0.5, 2, 2 and 1)
 eps_curves_sim <- 1                   # Tikhonov parameter of the curves of the fits
-eps_display_sim <- c("1" = 1, "2" = 2, "3" = 1, "4" = 1, "5" = 1, "6" = 1)
+eps_display_sim <- c("1" = 1, "2" = 8, "3" = 1, "4" = 1, "5" = 1, "6" = 1)
                                       # Tikhonov parameter of the curves drawn in Figure 7; it only
                                       # affects the drawing, so it can be changed without refitting
+anchored_display_sim <- c("1" = FALSE, "2" = TRUE, "3" = FALSE, "4" = FALSE, "5" = FALSE, "6" = FALSE)
+                                      # TRUE: the drawn curves are regularized with their starting
+                                      # point held at the center (see anchored_curve() below); used
+                                      # for the stronger smoothing of the noisy banana
 delta_sim <- 0.1                      # trimming proportion of the criterion
 
 dir.create(out_dir, showWarnings = FALSE)
@@ -181,18 +186,21 @@ comparison_curves <- function(X, gs_eps_curves = 1, gs_scale = FALSE) {
 ## Each method has the same color in all figures: directional PCA (linear and
 ## nonlinear) blue, classical PCA black, GS-PCA red, the principal curve magenta
 ## and the autoencoder orange. The directions of directional PCA are numbered and
-## distinguished by the line types in lty_dir (solid, dashed, dotted, ...).
+## distinguished by the line types in lty_dir: solid, dashed, dot-dashed, dotted,
+## long-dashed and two-dashed. The dotted line, the least visible one, is used for
+## the fourth direction, as the third one is important in the Hipparcos example.
 cols <- c(nlos = "blue", gs = "red", pca = "black", hs = "magenta", ae = "orange")
 labs <- c(nlos = "directional PCA", gs = "GS-PCA", pca = "PCA",
           hs = "principal curve", ae = "autoencoder")
-lty_dir <- c(1, 2, 3, 4, 5, 6)
+lty_dir <- c(1, 2, 4, 3, 5, 6)
 
 ## Data together with the first two directional principal curves (solid and
 ## dashed) and the curves of the competing methods, for the coordinates i and j.
 ## With eps_display, the directional curves are drawn with this Tikhonov
 ## parameter instead of the one of the fit.
 draw_curves <- function(X, fit, cmp, main, i = 1, j = 2, xlim = NULL, ylim = NULL,
-                        xlab = colnames(X)[i], ylab = colnames(X)[j], eps_display = NULL) {
+                        xlab = colnames(X)[i], ylab = colnames(X)[j], eps_display = NULL,
+                        anchored = FALSE) {
   if (is.null(xlim)) xlim <- range(X[, i])
   if (is.null(ylim)) ylim <- range(X[, j])
   plot(X[, i], X[, j], pch = 16, cex = pt_cex, col = "grey70", xlim = xlim, ylim = ylim,
@@ -201,9 +209,25 @@ draw_curves <- function(X, fit, cmp, main, i = 1, j = 2, xlim = NULL, ylim = NUL
     if (!is.null(cmp[[m]])) lines(cmp[[m]][, i], cmp[[m]][, j], col = cols[m], lwd = 2)
   for (k in 1:2) {
     C <- if (is.null(eps_display)) fit$curves[[k]]
+         else if (anchored) anchored_curve(directions(fit)[, k], fit, eps_display)
          else nlos_curve(directions(fit)[, k], fit, eps = eps_display)
     lines(C[, i], C[, j], col = cols["nlos"], lwd = 2.5, lty = lty_dir[k])
   }
+}
+
+## The principal curve along the direction u, regularized for display with its
+## starting point held at the center: the Tikhonov penalty also includes the
+## step from the center to the first point of the curve, eps ||v_1 - center||^2.
+## With the usual regularization, a strong smoothing moves the first point away
+## from the center, so that the drawn curve starts with a straight jump; the
+## anchored curve only differs from it near the center. This affects the drawn
+## curves only, not the principal directions or the projections.
+anchored_curve <- function(u, fit, eps) {
+  C <- nlos_curve(u, fit, eps = 0)                # the center and the unregularized points
+  c0 <- C[1, ]; Y <- C[-1, , drop = FALSE]; m <- nrow(Y)
+  L <- diff(diag(m + 1))[, -1, drop = FALSE]      # first differences, including v_1 - v_0
+  V <- solve(diag(m) + eps * crossprod(L), Y + eps * outer(c(1, rep(0, m - 1)), c0))
+  rbind(c0, V, deparse.level = 0)
 }
 
 ## The directional principal curves `which` of a bivariate fit, numbered at
@@ -416,13 +440,37 @@ mse_b <- sapply(1:4, function(k) reconstruction_mse(X_b, reconstruct(fit_b, n_co
 ## grey) and the curves.
 ## With newdata = TRUE, X are not the observations of the fit, and their
 ## projections are computed as for new observations.
-draw_reduction <- function(X, fit, k, main, newdata = FALSE, ...) {
-  P <- if (newdata) reconstruct(fit, newdata = X, n_components = k)
-       else reconstruct(fit, n_components = k)
+## The projections P and the curves can be given (see the Old Faithful example).
+draw_reduction <- function(X, fit, k, main, newdata = FALSE, curves = fit$curves, P = NULL, ...) {
+  if (is.null(P))
+    P <- if (newdata) reconstruct(fit, newdata = X, n_components = k)
+         else reconstruct(fit, n_components = k)
   plot(X, pch = 16, cex = pt_cex, col = "grey85", main = main, ...)
   points(P, pch = 16, cex = pt_cex, col = "grey55")
   for (j in seq_len(k))
-    lines(fit$curves[[j]], col = cols["nlos"], lwd = 2.5, lty = lty_dir[j])
+    lines(curves[[j]], col = cols["nlos"], lwd = 2.5, lty = lty_dir[j])
+}
+
+## Projections onto the first k = 1 or 2 principal curves when the first two
+## principal directions are antipodal (Old Faithful, Gvessel): an observation is
+## placed on the curve along which its score is larger, at the arc length (from
+## the center) given by that score, and observations whose scores are zero are
+## placed at the center. This is how reconstruct() projects onto these curves;
+## here, the curves can be those drawn (anchored_curve()), so that the
+## projections lie on the curves shown.
+point_at_length <- function(P, s) {
+  seg <- sqrt(rowSums(diff(P)^2)); cl <- c(0, cumsum(seg))
+  s <- min(max(s, 0), cl[length(cl)])
+  m <- findInterval(s, cl, rightmost.closed = TRUE, all.inside = TRUE)
+  w <- if (seg[m] > 0) (s - cl[m]) / seg[m] else 0
+  P[m, ] + w * (P[m + 1, ] - P[m, ])
+}
+project_on_curves <- function(fit, curves, X, k) {
+  S <- predict(fit, newdata = X)[, seq_len(k), drop = FALSE]
+  b <- max.col(S, ties.method = "first")
+  s <- S[cbind(seq_len(nrow(S)), b)]
+  t(sapply(seq_len(nrow(S)), function(i)
+    if (s[i] > 0) point_at_length(curves[[b[i]]], s[i]) else fit$center))
 }
 
 ## Figure 5, top (width = 0.4\textwidth): the data with the four directional
@@ -548,7 +596,8 @@ par(mfrow = c(3, 2), oma = c(2, 0, 0, 0), mar = c(2.8, 2.8, 1.6, 0.5))
 for (s in names(sim))
   with(sim[[s]], draw_curves(X, fit, cmp, main = setting_names[s],
                              xlim = windows[[s]]$xlim, ylim = windows[[s]]$ylim,
-                             eps_display = eps_display_sim[[s]]))
+                             eps_display = eps_display_sim[[s]],
+                             anchored = anchored_display_sim[[s]]))
 bottom_legend()
 dev.off()
 
@@ -563,6 +612,12 @@ dev.off()
 ## observations, since they do not need a sample size of this form, and the
 ## ties created by the resampling make the discrete Jacobians of GS-PCA
 ## degenerate (for most grid points with the resampled data).
+## The criterion uses eps = 2 (the value in the manuscript); the principal curves
+## and the projections use eps_curves = 8 (with mR = 60 points per curve, this is
+## still a mild regularization), and the drawn curves are regularized with their
+## starting point held at the center (anchored_curve()).
+of_eps <- 2
+of_eps_curves <- 8
 message("Old Faithful ...")
 old_faithful <- cached("section5_2_old_faithful", {
   X0 <- as.matrix(faithful[, c("eruptions", "waiting")])
@@ -578,9 +633,10 @@ old_faithful <- cached("section5_2_old_faithful", {
   ## clusters, as in the figure of the manuscript (eps = 4 gave this for five of
   ## the six).
   list(X0 = X0, X = X,
-       fit = nlospca(X, nR = 20, nS = 128, mR = 60, eps = 2, delta = 0, nthreads = nthreads),
+       fit = nlospca(X, nR = 20, nS = 128, mR = 60, eps = of_eps, eps_curves = of_eps_curves,
+                     delta = 0, nthreads = nthreads),
        cmp = comparison_curves(X0))
-}, deps = list(break_ties, comparison_curves, run_ae, ae_steps))
+}, deps = list(of_eps, of_eps_curves, break_ties, comparison_curves, run_ae, ae_steps))
 X_of <- old_faithful$X
 fit_of <- old_faithful$fit
 cmp_of <- old_faithful$cmp
@@ -590,12 +646,17 @@ print(fit_of)
 ## mostly copies of them), and the reconstruction errors are computed for these.
 X_of0 <- old_faithful$X0
 lab_of <- c("eruption duration (min)", "waiting time (min)")
+## the four principal curves as drawn (anchored at the center)
+curves_of <- lapply(1:4, function(j) anchored_curve(directions(fit_of)[, j], fit_of, of_eps_curves))
+fit_of_drawn <- fit_of
+fit_of_drawn$curves <- curves_of
 
 ## Figure 8 (width = 0.7\textwidth): comparison of the methods (with the legend
 ## in two rows)
 fig_pdf("old_faithful_comparison.pdf", 0.7, 4.6)
 par(oma = c(3, 0, 0, 0), mar = c(2.8, 2.8, 0.5, 0.5))
-draw_curves(X_of0, fit_of, cmp_of, main = "", xlab = lab_of[1], ylab = lab_of[2])
+draw_curves(X_of0, fit_of, cmp_of, main = "", xlab = lab_of[1], ylab = lab_of[2],
+            eps_display = of_eps_curves, anchored = TRUE)
 bottom_legend(nrow = 2)
 dev.off()
 
@@ -605,14 +666,17 @@ dev.off()
 fig_pdf("old_faithful_curves.pdf", 0.48, 3.3)
 par(mar = c(2.8, 2.8, 0.5, 0.5))
 ## room above the highest curve for its label
-ylim_of <- range(X_of0[, 2], sapply(fit_of$curves, function(C) C[, 2]))
+ylim_of <- range(X_of0[, 2], sapply(curves_of, function(C) C[, 2]))
 plot(X_of0, pch = 16, cex = pt_cex, col = "grey70", xlab = lab_of[1], ylab = lab_of[2],
      ylim = ylim_of + c(0, 0.05) * diff(ylim_of))
-draw_dir_curves(fit_of)
+draw_dir_curves(fit_of_drawn)
 dev.off()
 
 ## Figure 9 (2): the projections onto the manifolds spanned by the first k
-## principal curves, k = 1, ..., 4
+## principal curves, k = 1, ..., 4. The reconstruction errors are those of
+## reconstruct(). For k = 1 and 2 (the first two directions are antipodal), the
+## projections are drawn on the curves shown (project_on_curves()); their errors
+## agree with those of reconstruct() to two decimals.
 mse_of <- sapply(1:4, function(k)
   reconstruction_mse(X_of0, reconstruct(fit_of, newdata = X_of0, n_components = k)))
 ## Figure 9, right (width = 0.48\textwidth); the panels are small, so the axis
@@ -620,11 +684,169 @@ mse_of <- sapply(1:4, function(k)
 fig_pdf("old_faithful_reduction.pdf", 0.48, 3.3)
 par(mfrow = c(2, 2), mar = c(1.8, 1.8, 1.4, 0.3))
 for (k in 1:4)
-  draw_reduction(X_of0, fit_of, k, newdata = TRUE, xlab = "", ylab = "",
+  draw_reduction(X_of0, fit_of, k, newdata = TRUE, xlab = "", ylab = "", curves = curves_of,
+                 P = if (k <= 2) project_on_curves(fit_of, curves_of, X_of0, k),
                  main = paste0("k = ", k, ", MSE = ", round(mse_of[k], 2)))
 dev.off()
 cat("Old Faithful, reconstruction errors (original observations) for k = 1, ..., 4:",
     round(mse_of, 3), "\n")
+
+## ===========================================================================
+## Section 5.2: the Hertzsprung-Russell diagram (Hipparcos)
+## ===========================================================================
+
+## Colour index B - V and absolute magnitude M_V = V + 5 log10(parallax / 100) of
+## the stars of the Hipparcos catalogue with parallaxes between 20 and 25
+## milliarcseconds, as distributed with Feigelson and Babu (2012) in the package
+## astrodatR. That package is archived on CRAN; it can be installed with
+##   install.packages("https://cran.r-project.org/src/contrib/Archive/astrodatR/astrodatR_0.1.tar.gz",
+##                    repos = NULL, type = "source")
+## The stars with a relative parallax error below 10% are retained, which gives
+## n = 2317 = 96 * 24 + 13, so that no resampling is needed. All methods are
+## fitted to the standardized data (B - V spans about 2 magnitudes and M_V about
+## 11), and the results are drawn in the original units, with the magnitude axis
+## reversed, as is customary for HR diagrams.
+## The settings are fixed in advance by the rules of the simulated examples of
+## Section 5.1, not by the result: nR = 20 radii (so that nS = 115 and n0 = 17),
+## the default direction grid of nlospca() (mS = 2415, so that mR * mS >= n), the
+## trimming delta = 0.1 and eps = 1 for the criterion and the curves. Below, a
+## scan over nR in {20, 30, 40}, eps in {0.5, 1, 2} and delta in {0.05, 0.1}
+## checks that the result does not depend on these choices.
+## (The figure in the manuscript of 19 October 2026 was computed with U.
+## Radojicic's settings nR = 96, nS = 24, mS = 24, eps = 4.76, eps_curves = 11.9
+## and delta = 0.05, chosen from a scan of 36 settings for the best separation
+## of the stellar groups; they give the same picture.)
+hr_nR <- 20; hr_nS <- 115; hr_mS <- NULL
+hr_eps <- 1                           # Tikhonov parameter of the criterion
+hr_eps_curves <- 1                    # Tikhonov parameter of the curves and projections
+hr_delta <- 0.1                       # trimming proportion of the criterion
+if (has_pkg("astrodatR")) {
+  message("Hertzsprung-Russell diagram ...")
+  hr <- cached("section5_2_hipparcos", {
+    utils::data("HIP", package = "astrodatR", envir = environment())
+    h <- HIP[is.finite(HIP$B.V) & HIP$e_Plx / HIP$Plx < 0.1, ]
+    X0 <- cbind("B-V" = h$B.V, "M_V" = h$Vmag + 5 * log10(h$Plx / 100))
+    rownames(X0) <- NULL
+    mu <- colMeans(X0); sdv <- apply(X0, 2, sd)
+    Z <- sweep(sweep(X0, 2, mu), 2, sdv, "/")
+    ## B - V and V are rounded (to 0.001 and 0.01 magnitudes); the ties are broken
+    ## by a negligible jitter of 1e-6 standard deviations
+    set.seed(1)
+    Z <- Z + matrix(rnorm(length(Z), sd = 1e-6), ncol = 2) %*% diag(apply(Z, 2, sd))
+    fit <- nlospca(Z, nR = hr_nR, nS = hr_nS, mS = hr_mS, eps = hr_eps,
+                   eps_curves = hr_eps_curves, delta = hr_delta, nthreads = nthreads)
+    cmp <- comparison_curves(Z)
+    ## both GS-PCA curves are shown, as the second one is discussed in the text
+    cmp$gs2 <- gspca(Z, eps_curves = 1, nthreads = nthreads)$curves[[2]]
+    list(X0 = X0, Z = Z, mu = mu, sdv = sdv, fit = fit, cmp = cmp)
+  }, deps = list(hr_nR, hr_nS, hr_mS, hr_eps, hr_eps_curves, hr_delta,
+                 comparison_curves, run_ae, ae_steps))
+  X_hr0 <- hr$X0
+  fit_hr <- hr$fit
+  print(fit_hr)
+  to_orig <- function(M) sweep(sweep(as.matrix(M), 2, hr$sdv, "*"), 2, hr$mu, "+")
+  cmp_hr <- lapply(hr$cmp, to_orig)
+  ## the fit with its curves and center in the original units, for drawing
+  fit_hr0 <- fit_hr
+  fit_hr0$curves <- lapply(fit_hr$curves, to_orig)
+  fit_hr0$center <- drop(to_orig(matrix(fit_hr$center, 1)))
+  cat(sprintf("Hipparcos: center of the fit B-V = %.2f, M_V = %.2f (the Sun: 0.65, 4.83)\n",
+              fit_hr0$center[1], fit_hr0$center[2]))
+
+  ## Stellar groups, for display only (not used by any of the methods). The
+  ## main-sequence ridge line is a robust loess fit of M_V on B - V, iterated on
+  ## the stars within 1 magnitude of it. Stars more than 1 magnitude brighter
+  ## than the ridge with B - V > 0.5 are red giants and clump stars (M_V < 2) or
+  ## subgiants; the main sequence is split at the colour of the Sun (B - V = 0.65)
+  ## into its upper (hotter) and lower (cooler) part; the five stars more than 1.5
+  ## magnitudes below the ridge are left aside ("other").
+  bv <- X_hr0[, 1]; mv <- X_hr0[, 2]; keep <- rep(TRUE, length(bv))
+  for (it in 1:4) {
+    ridge <- loess(mv ~ bv, subset = keep, span = 0.3, degree = 2, family = "symmetric",
+                   control = loess.control(surface = "direct"))
+    dmv <- mv - predict(ridge, data.frame(bv = bv))   # < 0: brighter than the ridge
+    keep <- abs(dmv) < 1
+  }
+  hr_groups <- c("upper main sequence", "lower main sequence", "subgiants",
+                 "red giants and clump", "other")
+  group_hr <- factor(ifelse(dmv < -1 & bv > 0.5, ifelse(mv < 2, hr_groups[4], hr_groups[3]),
+                     ifelse(dmv > 1.5, hr_groups[5], ifelse(bv < 0.65, hr_groups[1], hr_groups[2]))),
+                     levels = hr_groups)
+  group_cols <- c("#74a9cf", "#fdae6b", "#74c476", "#e34a33", "grey55")
+  ## Each star is assigned to the directional component with the largest score
+  ## (stars with all scores zero, at the center, are not assigned); the share of
+  ## each group assigned to each component:
+  assign_hr <- function(fit) {
+    S <- predict(fit)[, 1:4]
+    factor(ifelse(rowSums(S) > 0, max.col(S, ties.method = "first"), NA), levels = 1:4,
+           labels = paste("component", 1:4))
+  }
+  cat("Hipparcos: share of each group assigned to each directional component (largest score):\n")
+  print(round(prop.table(table(group_hr, assign_hr(fit_hr)), 1), 2))
+
+  ## Robustness: the same analysis for nR in {20, 30, 40} (nS = n %/% nR), eps in
+  ## {0.5, 1, 2} (criterion and curves) and delta in {0.05, 0.1}. For each setting
+  ## and group, the share of the stars assigned to the component that receives
+  ## most of them. The three branches are described by three distinct curves if
+  ## the upper main sequence, the lower main sequence and the subgiants go to three
+  ## different components, and the red giants to that of the subgiants.
+  hr_scan <- cached("section5_2_hipparcos_scan", {
+    n <- nrow(hr$Z); out <- NULL
+    for (nR in c(20, 30, 40)) for (e in c(0.5, 1, 2)) for (dl in c(0.05, 0.1)) {
+      nS <- n %/% nR
+      f <- nlospca(hr$Z, nR = nR, nS = nS, eps = e, delta = dl, nthreads = nthreads)
+      tab <- prop.table(table(group_hr, assign_hr(f)), 1)[1:4, ]
+      maj <- apply(tab, 1, which.max)
+      out <- rbind(out, data.frame(nR = nR, nS = nS, n0 = n - nR * nS, eps = e, delta = dl,
+                                   upper = tab[1, maj[1]], lower = tab[2, maj[2]],
+                                   subgiants = tab[3, maj[3]], giants = tab[4, maj[4]],
+                                   three_branches = length(unique(maj[1:3])) == 3 && maj[3] == maj[4]))
+    }
+    out
+  }, deps = list(assign_hr))
+  print(hr_scan, digits = 2)
+  cat(sprintf("Hipparcos scan: three branches described by three distinct curves in %d of %d settings;\n",
+              sum(hr_scan$three_branches), nrow(hr_scan)))
+  cat("  ranges of the shares (upper, lower main sequence, subgiants, giants):",
+      sapply(hr_scan[, c("upper", "lower", "subgiants", "giants")],
+             function(x) paste(round(100 * range(x)), collapse = "-")), "(%)\n")
+
+  lab_hr <- c(expression("colour index" ~ italic(B) * "-" * italic(V) ~ "(mag)"),
+              expression("absolute magnitude" ~ italic(M)[italic(V)] ~ "(mag)"))
+  ## magnitude axis reversed, with room for the numbers of the curves
+  ylim_hr <- rev(range(mv, sapply(fit_hr0$curves, function(C) C[, 2])) + c(-0.6, 0.2))
+  ## Figure 10, left (width = 0.48\textwidth): all methods (the second GS-PCA
+  ## curve dashed), with the legend in three rows
+  fig_pdf("HR_Hipparcos_curves.pdf", 0.48, 4.1)
+  par(oma = c(3.6, 0, 0, 0), mar = c(2.8, 2.8, 0.5, 0.5))
+  plot(X_hr0, pch = 16, cex = pt_cex, col = "grey70", ylim = ylim_hr,
+       xlab = lab_hr[[1]], ylab = lab_hr[[2]])
+  for (m in c("pca", "hs", "ae", "gs"))
+    if (!is.null(cmp_hr[[m]])) lines(cmp_hr[[m]], col = cols[m], lwd = 2)
+  lines(cmp_hr$gs2, col = cols["gs"], lwd = 2, lty = 2)
+  draw_dir_curves(fit_hr0)
+  ## legend with the second GS-PCA curve (dashed) next to the first one
+  par(fig = c(0, 1, 0, 1), oma = c(0, 0, 0, 0), mar = c(0, 0, 0, 0), new = TRUE)
+  plot(0, 0, type = "n", bty = "n", xaxt = "n", yaxt = "n", xlab = "", ylab = "")
+  legend("bottom", legend = c(labs[c("nlos", "gs")], "GS-PCA, second curve", labs[c("pca", "hs", "ae")]),
+         col = c(cols[c("nlos", "gs", "gs")], cols[c("pca", "hs", "ae")]),
+         lwd = 2, lty = c(1, 1, 2, 1, 1, 1), ncol = 2, bty = "n", cex = 0.9)
+  dev.off()
+  ## Figure 10, right (width = 0.48\textwidth): the directional principal curves
+  ## with the stars coloured by group
+  fig_pdf("HR_Hipparcos_groups.pdf", 0.48, 4.1)
+  par(oma = c(3.6, 0, 0, 0), mar = c(2.8, 2.8, 0.5, 0.5))
+  plot(X_hr0, pch = 16, cex = pt_cex, col = group_cols[group_hr], ylim = ylim_hr,
+       xlab = lab_hr[[1]], ylab = lab_hr[[2]])
+  draw_dir_curves(fit_hr0)
+  par(fig = c(0, 1, 0, 1), oma = c(0, 0, 0, 0), mar = c(0, 0, 0, 0), new = TRUE)
+  plot(0, 0, type = "n", bty = "n", xaxt = "n", yaxt = "n", xlab = "", ylab = "")
+  legend("bottom", legend = sprintf("%s (%d)", hr_groups, tabulate(group_hr, 5)),
+         col = group_cols, pch = 16, ncol = 2, bty = "n", cex = 0.85)
+  dev.off()
+} else {
+  message("The Hertzsprung-Russell example is skipped: it needs the package 'astrodatR' (see above).")
+}
 
 ## ===========================================================================
 ## Section 5.3: Gvessel
@@ -643,6 +865,13 @@ cat("Old Faithful, reconstruction errors (original observations) for k = 1, ...,
 ## direction changes by at most 3 degrees. Note also that the manuscript uses a
 ## 20 x 20 x 10 grid for GS-PCA, whereas gspca() uses the same number of grid
 ## points on each axis (here its default grid).
+## The criterion uses eps = 2; the principal curves and the projections use the
+## stronger regularization eps_curves = 4, which removes most wiggles of the
+## curves but keeps the small hook at the surface (eps_curves = 8 also removes
+## the hook); the principal directions are the same. The drawn curves are
+## regularized with their starting point held at the center (anchored_curve()).
+gv_eps <- 2
+gv_eps_curves <- 4
 if (has_pkg("LPCM")) {
   message("Gvessel ...")
   gv <- cached("section5_3_gvessel", {
@@ -653,10 +882,11 @@ if (has_pkg("LPCM")) {
     set.seed(1)
     X <- break_ties(X0[sample(nrow(X0), 4001, replace = TRUE), ])
     list(X0 = X0, X = X,
-         fit = nlospca(X, nR = 40, nS = 100, eps = 2, delta = 0, nthreads = nthreads),
+         fit = nlospca(X, nR = 40, nS = 100, eps = gv_eps, eps_curves = gv_eps_curves,
+                       delta = 0, nthreads = nthreads),
                                       # manuscript: alpha = 1 in the earlier implementation
          cmp = comparison_curves(X0, gs_scale = TRUE))
-  }, deps = list(break_ties, comparison_curves, run_ae, ae_steps))
+  }, deps = list(gv_eps, gv_eps_curves, break_ties, comparison_curves, run_ae, ae_steps))
   X_gv <- gv$X
   fit_gv <- gv$fit
   cmp_gv <- gv$cmp
@@ -665,17 +895,21 @@ if (has_pkg("LPCM")) {
   ## As for Old Faithful, the figures show the 643 original observations.
   X_gv0 <- gv$X0
   pairs_3 <- list(c(1, 2), c(1, 3), c(2, 3))
-  ## Figure 10 (width = \textwidth): the three pairs of variables
+  ## the first two principal curves as drawn (anchored at the center)
+  curves_gv <- lapply(1:2, function(j) anchored_curve(directions(fit_gv)[, j], fit_gv, gv_eps_curves))
+  ## Figure 11 (width = \textwidth): the three pairs of variables
   fig_pdf("gvessel_comparison.pdf", 1, 2.9)
   par(mfrow = c(1, 3), oma = c(2, 0, 0, 0), mar = c(2.8, 2.8, 0.5, 0.5))
   for (p in pairs_3)
-    draw_curves(X_gv0, fit_gv, cmp_gv, main = "", i = p[1], j = p[2])
+    draw_curves(X_gv0, fit_gv, cmp_gv, main = "", i = p[1], j = p[2],
+                eps_display = gv_eps_curves, anchored = TRUE)
   bottom_legend()
   dev.off()
 
   ## projections onto the manifold spanned by the first two principal curves
-  ## (medium grey), with the data (light grey) and the two curves
-  P2_gv <- reconstruct(fit_gv, newdata = X_gv0, n_components = 2)
+  ## (medium grey), with the data (light grey) and the two curves; the
+  ## projections are drawn on the curves shown (project_on_curves())
+  P2_gv <- project_on_curves(fit_gv, curves_gv, X_gv0, 2)
   ## (width = \textwidth)
   fig_pdf("gvessel_reduction.pdf", 1, 2.5)
   par(mfrow = c(1, 3), mar = c(2.8, 2.8, 0.5, 0.5))
@@ -683,7 +917,7 @@ if (has_pkg("LPCM")) {
     plot(X_gv0[, p], pch = 16, cex = pt_cex, col = "grey85")
     points(P2_gv[, p], pch = 16, cex = pt_cex, col = "grey55")
     for (j in 1:2)
-      lines(fit_gv$curves[[j]][, p], col = cols["nlos"], lwd = 2, lty = lty_dir[j])
+      lines(curves_gv[[j]][, p], col = cols["nlos"], lwd = 2, lty = lty_dir[j])
   }
   dev.off()
 } else {
@@ -808,8 +1042,8 @@ if (make_html && has_pkg("plotly") && has_pkg("htmlwidgets")) {
                                 line = list(color = cols[[m]], width = 5))
     for (j in 1:2)
       pg <- plotly::add_trace(pg, type = "scatter3d", mode = "lines",
-                              x = fit_gv$curves[[j]][, 1], y = fit_gv$curves[[j]][, 2],
-                              z = fit_gv$curves[[j]][, 3],
+                              x = curves_gv[[j]][, 1], y = curves_gv[[j]][, 2],
+                              z = curves_gv[[j]][, 3],
                               name = paste("directional PCA, curve", j),
                               line = list(color = cols[["nlos"]], width = 7,
                                           dash = if (j == 1) "solid" else "dash"))
