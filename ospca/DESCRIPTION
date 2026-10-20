@@ -7,6 +7,10 @@ Authors@R:
              role = c("aut", "cre"),
              email = "klausnordhausenR@gmail.com",
              comment = c(ORCID = "0000-0002-3758-8501")),
+      person(given = "Eustasio",
+             family = "del Barrio Tellado",
+             role = "aut",
+             comment = c(ORCID = "0000-0003-3764-5411")),
       person(given = "Marc",
              family = "Hallin",
              role = "aut",
@@ -32,5 +36,5 @@ LinkingTo: Rcpp
 Suggests: knitr, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 Config/testthat/edition: 3
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.1
 NeedsCompilation: yes

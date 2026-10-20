@@ -79,6 +79,7 @@ principal components: a measure transportation approach.
 Authors:
 \itemize{
   \item Klaus Nordhausen \email{klausnordhausenR@gmail.com} (\href{https://orcid.org/0000-0002-3758-8501}{ORCID})
+  \item Eustasio del Barrio Tellado (\href{https://orcid.org/0000-0003-3764-5411}{ORCID})
   \item Marc Hallin (\href{https://orcid.org/0000-0002-6599-7409}{ORCID})
   \item Una Radojicic (\href{https://orcid.org/0000-0003-0329-0595}{ORCID})
 }

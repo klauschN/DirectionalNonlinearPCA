@@ -48,18 +48,22 @@ export(reconstruct)
 export(reconstruction_mse)
 export(scores)
 importFrom(Rcpp,sourceCpp)
-importFrom(graphics,abline)
-importFrom(graphics,arrows)
-importFrom(graphics,axis)
-importFrom(graphics,barplot)
-importFrom(graphics,lines)
-importFrom(graphics,mtext)
-importFrom(graphics,points)
-importFrom(graphics,text)
-importFrom(stats,fitted)
-importFrom(stats,optim)
-importFrom(stats,predict)
-importFrom(stats,residuals)
-importFrom(stats,rnorm)
-importFrom(stats,screeplot)
+importFrom(graphics,
+  abline,
+  arrows,
+  axis,
+  barplot,
+  lines,
+  mtext,
+  points,
+  text
+)
+importFrom(stats,
+  fitted,
+  optim,
+  predict,
+  residuals,
+  rnorm,
+  screeplot
+)
 useDynLib(ospca, .registration = TRUE)
