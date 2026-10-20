@@ -12,7 +12,7 @@ The folder ospca contains the source of the R package ospca. Its main functions 
 -   nlospca() Directional nonlinear PCA, based on the empirical center-outward quantile function
 -   gspca() A basic implementation of the independent nonlinear component analysis (GS-PCA) of Gunsilius and Schennach (2023), for comparison
 
-For all three methods, the functions directions(), scores(), predict(), reconstruct(), reconstruction_mse(), screeplot() and plot() give the directions, the scores, the reconstructions and graphical summaries. The package has three vignettes, which illustrate the methods on simple data. Its authors are Nordhausen, K., del Barrio Tellado, E., Hallin, M. and Radojicic, U.
+For all three methods, the functions directions(), scores(), predict(), reconstruct(), reconstruction_mse(), screeplot() and plot() give the directions, the scores, the reconstructions and graphical summaries. The package has three vignettes, which illustrate the methods on simple data.
 
 The package contains C++ code, so that installing it from source needs a C++ compiler (Rtools on Windows). It can be installed directly from this repository with
 
